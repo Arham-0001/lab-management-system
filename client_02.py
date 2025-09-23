@@ -6,7 +6,7 @@ server_ip = "http://127.0.0.1:5000"
 client_id = "pc_02"
 
 # image=pyautogui.screenshot()
-# image.save("screenshot.png")
+# image.save("screenshot.png")                          
 # print("the screentshot save in screenshot.png")
 
 while True:
