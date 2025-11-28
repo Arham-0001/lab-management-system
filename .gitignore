@@ -2,3 +2,5 @@ __pycache__
 static/screenshots
 venv1
 .venv
+*.db
+static/videos
