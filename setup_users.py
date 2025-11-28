@@ -1,16 +1,18 @@
 import sqlite3
+from werkzeug.security import generate_password_hash
 
 DB = "users.db"
 
 ADMIN_USERNAME = "Admin"
 ADMIN_EMAIL = "aryanrwt018@gmail.com"
-ADMIN_PASSWORD = "AdminNewPass123!"
+ADMIN_PASSWORD = "Arham277!"
 ADMIN_ROLE = "Admin"
 
 conn = sqlite3.connect(DB)
 c = conn.cursor()
 
-c.execute("""
+# ensure users table exists (compatible with server.init_db)
+c.execute('''
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
@@ -19,19 +21,21 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL,
     approved INTEGER DEFAULT 1
 )
-""")
+''')
 
 c.execute("SELECT * FROM users WHERE role='Admin'")
 if not c.fetchone():
+    pw_hash = generate_password_hash(ADMIN_PASSWORD)
     c.execute(
         "INSERT INTO users (username, email, password, role, approved) VALUES (?, ?, ?, ?, ?)",
-        (ADMIN_USERNAME, ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_ROLE, 1)
+        (ADMIN_USERNAME, ADMIN_EMAIL, pw_hash, ADMIN_ROLE, 1)
     )
     print("Admin account created.")
 else:
+    pw_hash = generate_password_hash(ADMIN_PASSWORD)
     c.execute(
         "UPDATE users SET email=?, password=? WHERE role='Admin'",
-        (ADMIN_EMAIL, ADMIN_PASSWORD)
+        (ADMIN_EMAIL, pw_hash)
     )
     print("Admin account updated.")
 
