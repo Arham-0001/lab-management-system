@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash
 DB = "users.db"
 
 ADMIN_USERNAME = "Admin"
-ADMIN_EMAIL = "aryanrwt018@gmail.com"
+ADMIN_EMAIL = "arhamrehman278@gmail.com"
 ADMIN_PASSWORD = "Arham277!"
 ADMIN_ROLE = "Admin"
 
