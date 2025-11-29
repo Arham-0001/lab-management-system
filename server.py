@@ -237,6 +237,15 @@ def enqueue_command():
     if not client_id or not command:
         return jsonify({'error':'client_id and command required'}), 400
     now = time.time()
+    # For safety, prevent duplicate pending 'screenshot' commands for the same client
+    if command == 'screenshot':
+        conn_check = sqlite3.connect(DB)
+        c_check = conn_check.cursor()
+        c_check.execute("SELECT id FROM commands WHERE client_id=? AND command=? AND status='pending'", (client_id, command))
+        if c_check.fetchone():
+            conn_check.close()
+            return jsonify({'ok': False, 'message': 'screenshot already pending'}), 409
+        conn_check.close()
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute('INSERT INTO commands (client_id,command,args,created_at,updated_at) VALUES (?,?,?,?,?)',
@@ -298,10 +307,11 @@ def dashboard():
     pcs_offline = sum(1 for p in pcs if p['status']=="Offline")
 
     conn.close()
+    now_ts = int(time.time())
     return render_template("dashboard.html", pending_users=pending_users,
                            pcs=pcs, pcs_total=pcs_total, pcs_online=pcs_online,
                            pcs_idle=pcs_idle, pcs_offline=pcs_offline,
-                           heartbeats=heartbeats)
+                           heartbeats=heartbeats, now=now_ts)
 
 @app.route("/approve-user/<int:user_id>", methods=["POST"])
 def approve_user(user_id):
@@ -354,6 +364,18 @@ def upload_screenshot(client_id):
     path = f"static/screenshots/{client_id}.png"
     screenshot.save(path)
     return jsonify({"msg":"Screenshot uploaded"})
+
+
+@app.route('/screenshot/<client_id>', methods=['GET'])
+def screenshot_info(client_id):
+    # Provide info about a screenshot: exists, mtime and a url with cache-busting mtime
+    path = os.path.join('static', 'screenshots', f"{client_id}.png")
+    exists = os.path.exists(path)
+    mtime = int(os.path.getmtime(path)) if exists else 0
+    url = url_for('static', filename=f'screenshots/{client_id}.png')
+    if exists:
+        url = f"{url}?t={mtime}"
+    return jsonify({"exists": exists, "mtime": mtime, "url": url})
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
