@@ -25,6 +25,7 @@ import requests
 # Try to use mss for fast screenshots; fallback to PIL/pyscreenshot
 try:
     import mss
+    
     USE_MSS = True
 except Exception:
     from PIL import ImageGrab

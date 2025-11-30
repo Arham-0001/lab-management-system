@@ -109,7 +109,7 @@ button.secondary { background:#e74c3c; }
         {% endif %}
 
         <!-- Active PCs with command controls -->
-        <h2 style="margin-top:30px;">Active PCs</h2>
+        <h2 style="margin-top:30px;">Connected PCs</h2>
         <div class="pc-grid" id="pc-grid">
         {% for p in pcs %}
         <div class="pc-card">
@@ -139,7 +139,7 @@ button.secondary { background:#e74c3c; }
                     <option value="restart">Restart</option>
                     <option value="shutdown">Shutdown</option>
                 </select>
-                <button id="send-btn-{{ safe_id }}" onclick="sendCommand('{{ p.id }}', document.getElementById('cmd-{{ safe_id }}').value)">Send</button>
+                <button id="send-btn-{{ safe_id }}" {% if p.status == 'Offline' %}disabled class="disabled-btn"{% endif %} onclick="sendCommand('{{ p.id }}', document.getElementById('cmd-{{ safe_id }}').value)">Send</button>
             </div>
         </div>
         {% endfor %}

@@ -7,7 +7,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = "super-secret-key"
+
+# Secure secret key
+app.secret_key = os.environ.get("FLASK_SECRET") or os.urandom(24)
+
+# Read debug value from env (default off)
+DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
+
 
 commands = {}
 heartbeats = {}
@@ -18,8 +24,11 @@ CODE_STORE = {}
 CODE_EXPIRY = 600
 
 def init_db():
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB, timeout=30)
     c = conn.cursor()
+# Better concurrency
+    c.execute("PRAGMA journal_mode=WAL;")
+
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,13 +302,36 @@ def dashboard():
     else:
         pending_users = []
 
-    # Simulated PC statuses
+    # Determine PC list from registered users (excluding simulator accounts) and heartbeat entries
     pcs = []
     c.execute("SELECT id, username FROM users")
     users = c.fetchall()
+    real_usernames = []
     for u in users:
-        status = random.choice(["Online","Idle","Offline"])
-        pcs.append({"id":u[1], "status":status})
+        uname = u[1]
+        if not uname:
+            continue
+        # Exclude simulator accounts created by tests (start with 'sim')
+        if uname.lower().startswith('sim'):
+            continue
+        real_usernames.append(uname)
+
+    # Build set of clients to show: registered real usernames + heartbeat-known clients
+    client_ids = set(real_usernames) | set(heartbeats.keys())
+    now_time = time.time()
+    for cid in sorted(client_ids):
+        hb_time = heartbeats.get(cid)
+        if hb_time:
+            age = now_time - hb_time
+            if age < 60:
+                status = "Online"
+            elif age < 300:
+                status = "Idle"
+            else:
+                status = "Offline"
+        else:
+            status = "Offline"
+        pcs.append({"id": cid, "status": status})
 
     pcs_total = len(pcs)
     pcs_online = sum(1 for p in pcs if p['status']=="Online")
@@ -378,4 +410,4 @@ def screenshot_info(client_id):
     return jsonify({"exists": exists, "mtime": mtime, "url": url})
 
 if __name__=="__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=DEBUG)
