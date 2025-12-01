@@ -321,6 +321,76 @@ function onImageError(img){
         img.src = "{{ url_for('static', filename='images/logo.png') }}";
     }catch(e){ console.error('onImageError failed', e); }
 }
+
+// Fetch a summary of clients and their status/screenshot info and update the UI
+async function updateClientsStatus(){
+    try{
+        const res = await fetch('/clients-status');
+        if(!res.ok) return;
+        const data = await res.json();
+        const counts = data.counts || {};
+        // update stat cards safely
+        const statCards = document.querySelectorAll('.stats-grid .stats-card h2');
+        if(statCards.length >= 4){
+            statCards[0].textContent = counts.total || 0;
+            statCards[1].textContent = counts.online || 0;
+            statCards[2].textContent = counts.idle || 0;
+            statCards[3].textContent = counts.offline || 0;
+        }
+
+        // Map existing client elements
+        const existing = {};
+        document.querySelectorAll('.pc-card').forEach(card=>{
+            const id = card.querySelector('[data-client-id]')?.dataset?.clientId;
+            if(id) existing[id] = card;
+        });
+
+        for(const c of data.clients){
+            const cid = c.id;
+            const status = c.status;
+            const thumbUrl = c.screenshot_url;
+            const mtime = c.screenshot_mtime || 0;
+            // update existing card
+            if(existing[cid]){
+                const card = existing[cid];
+                const statusEl = card.querySelector('.pc-status');
+                if(statusEl){
+                    statusEl.textContent = status;
+                    statusEl.className = 'pc-status ' + status.toLowerCase();
+                }
+                const btn = card.querySelector('[id^="send-btn-"]');
+                if(btn){
+                    if(status === 'Offline'){ btn.classList.add('disabled-btn'); btn.disabled = true; }
+                    else { btn.classList.remove('disabled-btn'); btn.disabled = false; }
+                }
+                const thumb = card.querySelector('.screenshot-thumb');
+                if(thumb){
+                    const key = thumb.dataset.clientId;
+                    const last = lastMTime[key] || 0;
+                    if(mtime > last){
+                        lastMTime[key] = mtime;
+                        thumb.src = thumbUrl + '&_=' + Date.now();
+                        if(currentScreenshotId === key){
+                            const full = document.getElementById('screenshotFull'); if(full) full.src = thumbUrl + '&_=' + Date.now();
+                        }
+                    }
+                }
+            } else {
+                // create new card when a new client appears
+                const safe = cid.replace(/[@.:\/\s]/g, '_');
+                const grid = document.getElementById('pc-grid');
+                const div = document.createElement('div');
+                div.className = 'pc-card';
+                div.innerHTML = `\n                    <div style="font-weight:600">${cid}</div>\n                    <div class="pc-status ${status.toLowerCase()}">${status}</div>\n                    <div style="margin-top:10px;">\n                        <div class=\"thumb-wrapper\">\n                            <img id=\"screenshot-thumb-${safe}\" data-client-id=\"${cid}\" src=\"${thumbUrl}\" alt=\"Screenshot for ${cid}\" class=\"screenshot-thumb\" onerror=\"onImageError(this)\" onclick=\"openScreenshot('${cid}')\">\n                            <div id=\"thumb-overlay-${safe}\" class=\"thumb-overlay\" aria-hidden=\"true\"><div class=\"spinner\"></div></div>\n                        </div>\n                    </div>\n                    <div style=\"margin-top:10px; display:flex; gap:8px; justify-content:center; align-items:center;\">\n                        <select id=\"cmd-${safe}\">\n                            <option value=\"screenshot\">Screenshot</option>\n                            <option value=\"restart\">Restart</option>\n                            <option value=\"shutdown\">Shutdown</option>\n                        </select>\n                        <button id=\"send-btn-${safe}\" ${status==='Offline'?'disabled class=\"disabled-btn\"':''} onclick=\"sendCommand('${cid}', document.getElementById('cmd-${safe}').value)\">Send</button>\n                    </div>`;
+                grid.appendChild(div);
+                lastMTime[cid] = mtime || 0;
+            }
+        }
+    } catch(e){ console.error('updateClientsStatus failed', e); }
+}
+
+// Poll the server every 5s for client status updates
+setInterval(updateClientsStatus, 5000);
 </script>
 
 </body>

@@ -409,5 +409,68 @@ def screenshot_info(client_id):
         url = f"{url}?t={mtime}"
     return jsonify({"exists": exists, "mtime": mtime, "url": url})
 
+
+@app.route('/clients-status', methods=['GET'])
+def clients_status():
+    # Returns current set of clients with status and screenshot info
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users")
+    users = c.fetchall()
+    real_usernames = []
+    for u in users:
+        uname = u[1]
+        if not uname:
+            continue
+        # Exclude simulator accounts created by tests (start with 'sim')
+        if uname.lower().startswith('sim'):
+            continue
+        real_usernames.append(uname)
+    conn.close()
+
+    now_time = time.time()
+    client_ids = set(real_usernames) | set(heartbeats.keys())
+
+    clients = []
+    pcs_online = pcs_idle = pcs_offline = 0
+    for cid in sorted(client_ids):
+        hb_time = heartbeats.get(cid)
+        if hb_time:
+            age = now_time - hb_time
+            if age < 60:
+                status = 'Online'
+                pcs_online += 1
+            elif age < 300:
+                status = 'Idle'
+                pcs_idle += 1
+            else:
+                status = 'Offline'
+                pcs_offline += 1
+        else:
+            status = 'Offline'
+            pcs_offline += 1
+
+        # Screenshot metadata
+        path = os.path.join('static', 'screenshots', f"{cid}.png")
+        exists = os.path.exists(path)
+        mtime = int(os.path.getmtime(path)) if exists else 0
+        url = url_for('static', filename=f'screenshots/{cid}.png')
+        if exists:
+            url = f"{url}?t={mtime}"
+
+        clients.append({
+            'id': cid,
+            'status': status,
+            'screenshot_exists': exists,
+            'screenshot_mtime': mtime,
+            'screenshot_url': url
+        })
+
+    return jsonify({
+        'clients': clients,
+        'counts': {'total': len(clients), 'online': pcs_online, 'idle': pcs_idle, 'offline': pcs_offline},
+        'pending_approvals': len([1 for u in real_usernames if False])
+    })
+
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=DEBUG)
