@@ -57,6 +57,25 @@ def init_db():
 
 init_db()
 
+
+def _log_smtp_config():
+    smtp_server = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+    smtp_port = os.environ.get('SMTP_PORT', '587')
+    smtp_user = os.environ.get('SMTP_USER')
+    smtp_use_tls = os.environ.get('SMTP_USE_TLS', '1')
+    print(f"SMTP config: server={smtp_server} port={smtp_port} user={'set' if smtp_user else 'NOT SET'} use_tls={smtp_use_tls}")
+
+_log_smtp_config()
+
+def admin_required(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'user_email' not in session or session.get('role','').lower() != 'admin':
+            return jsonify({'error':'admin required'}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
 def password_valid(password):
     import re
     pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$'
@@ -68,19 +87,43 @@ def send_email(to_email, subject, html_content):
     smtp_port = int(os.environ.get('SMTP_PORT', 587))
     smtp_user = os.environ.get('SMTP_USER')
     smtp_pass = os.environ.get('SMTP_PASS')
+    # Allow disabling STARTTLS for local debug servers
+    smtp_use_tls = os.environ.get('SMTP_USE_TLS', '1') in ('1', 'true', 'yes')
     if not smtp_user or not smtp_pass:
-        # skip sending if not configured
-        print('SMTP not configured; skipping email to', to_email)
-        return
+        # If no credentials are configured, we will attempt to send without auth
+        # (useful for local debug SMTP servers on localhost).
+        # If you want to force skipping emails entirely, set SMTP_USER and SMTP_PASS.
+        if smtp_server not in ('localhost', '127.0.0.1'):
+            print('SMTP credentials missing and server is not localhost; skipping email to', to_email)
+            return False
     msg = MIMEMultipart('alternative')
-    msg['From'] = smtp_user
+    from_addr = smtp_user or f"no-reply@{smtp_server}"
+    msg['From'] = from_addr
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(html_content, 'html'))
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            # If TLS is requested/available, try to upgrade
+            if smtp_use_tls:
+                try:
+                    server.starttls()
+                except Exception:
+                    # ignore starttls failures for local debug servers
+                    pass
+
+            # If credentials provided, attempt to login
+            if smtp_user and smtp_pass:
+                try:
+                    server.login(smtp_user, smtp_pass)
+                except Exception as e:
+                    print('SMTP login failed:', e)
+                    # proceed only if server allows sending without login
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print('SMTP send failed for', to_email, e)
+        return False
 
 def send_verification_email(to_email, code):
     html_content = f"""
@@ -91,7 +134,12 @@ def send_verification_email(to_email, code):
     <p>Expires in 10 minutes.</p>
     </div>
     """
-    send_email(to_email, "SLMMS Verification Code", html_content)
+    # Return whether we actually attempted / succeeded in sending the email.
+    # send_email returns True on success, False on failure/skip.
+    try:
+        return send_email(to_email, "SLMMS Verification Code", html_content)
+    except Exception:
+        return False
 
 def send_rejection_email(to_email, reason):
     html_content = f"""
@@ -101,7 +149,10 @@ def send_rejection_email(to_email, reason):
     <p><b>Reason:</b> {reason}</p>
     </div>
     """
-    send_email(to_email, "SLMMS Account Rejection", html_content)
+    try:
+        return send_email(to_email, "SLMMS Account Rejection", html_content)
+    except Exception:
+        return False
 
 # -------- Routes --------
 
@@ -148,7 +199,7 @@ def login():
                 else:
                     flash("Invalid credentials","error")
                     return render_template("login.html")
-            if role == "Admin" or approved == 1:
+            if (role and str(role).lower() == "admin") or approved == 1:
                 session['user_email'] = email
                 session['role'] = role
                 flash("Login successful","success")
@@ -200,11 +251,9 @@ def forgot_password():
         if user:
             code = ''.join(random.choices(string.digits,k=6))
             CODE_STORE[email] = {"code": code, "time": time.time()}
-            send_verification_email(email, code)
-            # If SMTP isn't configured, show the code in UI for development convenience.
-            smtp_user = os.environ.get('SMTP_USER')
-            smtp_pass = os.environ.get('SMTP_PASS')
-            if not smtp_user or not smtp_pass:
+            sent = send_verification_email(email, code)
+            # If email send failed (or skipped), show the code in UI for development convenience.
+            if not sent:
                 flash(f"Verification code (dev): {code}", "info")
             flash("Verification code sent","info")
             return redirect(url_for("reset_password", email=email))
@@ -296,7 +345,7 @@ def dashboard():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     # Pending approvals for admins
-    if session.get('role') == "Admin":
+    if session.get('role','').lower() == "admin":
         c.execute("SELECT id, username, email FROM users WHERE approved=0")
         pending_users = c.fetchall()
     else:
@@ -346,30 +395,59 @@ def dashboard():
                            heartbeats=heartbeats, now=now_ts)
 
 @app.route("/approve-user/<int:user_id>", methods=["POST"])
+@admin_required
 def approve_user(user_id):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("UPDATE users SET approved=1 WHERE id=?",(user_id,))
-    c.execute("SELECT email FROM users WHERE id=?",(user_id,))
-    email = c.fetchone()[0]
+    c.execute("SELECT email, username FROM users WHERE id=?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error':'user not found'}), 404
+    email, username = row[0], row[1]
+    c.execute("UPDATE users SET approved=1 WHERE id=?", (user_id,))
     conn.commit()
     conn.close()
+
+    # notify user by email (best-effort)
+    try:
+        html = f"""
+        <div style='font-family:sans-serif; text-align:center; padding:20px;'>
+        <h2>SLMMS Account Approved</h2>
+        <p>Hello {username or ''},</p>
+        <p>Your account has been approved by the administrator. You can now log in.</p>
+        </div>
+        """
+        sent = send_email(email, "SLMMS Account Approved", html)
+    except Exception as e:
+        print('Approval email send failed', e)
+        sent = False
+
     flash("User approved","success")
-    return jsonify({"ok":True})
+    return jsonify({"ok":True, 'email_sent': bool(sent)})
 
 @app.route("/reject-user/<int:user_id>", methods=["POST"])
+@admin_required
 def reject_user(user_id):
-    reason = request.form.get("reason")
+    reason = request.form.get("reason") or "No reason provided"
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("SELECT email FROM users WHERE id=?",(user_id,))
-    email = c.fetchone()[0]
-    c.execute("DELETE FROM users WHERE id=?",(user_id,))
+    c.execute("SELECT email, username FROM users WHERE id=?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error':'user not found'}), 404
+    email, username = row[0], row[1]
+    c.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
     conn.close()
-    send_rejection_email(email, reason)
+    try:
+        sent = send_rejection_email(email, reason)
+    except Exception as e:
+        print('Rejection email send failed', e)
+        sent = False
     flash("User rejected and email sent","error")
-    return jsonify({"ok":True})
+    return jsonify({"ok":True, 'email_sent': bool(sent)})
 
 @app.route("/logout")
 def logout():
@@ -408,6 +486,79 @@ def screenshot_info(client_id):
     if exists:
         url = f"{url}?t={mtime}"
     return jsonify({"exists": exists, "mtime": mtime, "url": url})
+
+
+@app.route('/clients-status', methods=['GET'])
+def clients_status():
+    # Returns current set of clients with status and screenshot info
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users")
+    users = c.fetchall()
+    real_usernames = []
+    for u in users:
+        uname = u[1]
+        if not uname:
+            continue
+        # Exclude simulator accounts created by tests (start with 'sim')
+        if uname.lower().startswith('sim'):
+            continue
+        real_usernames.append(uname)
+    conn.close()
+
+    now_time = time.time()
+    client_ids = set(real_usernames) | set(heartbeats.keys())
+
+    clients = []
+    pcs_online = pcs_idle = pcs_offline = 0
+    for cid in sorted(client_ids):
+        hb_time = heartbeats.get(cid)
+        if hb_time:
+            age = now_time - hb_time
+            if age < 60:
+                status = 'Online'
+                pcs_online += 1
+            elif age < 300:
+                status = 'Idle'
+                pcs_idle += 1
+            else:
+                status = 'Offline'
+                pcs_offline += 1
+        else:
+            status = 'Offline'
+            pcs_offline += 1
+
+        # Screenshot metadata
+        path = os.path.join('static', 'screenshots', f"{cid}.png")
+        exists = os.path.exists(path)
+        mtime = int(os.path.getmtime(path)) if exists else 0
+        url = url_for('static', filename=f'screenshots/{cid}.png')
+        if exists:
+            url = f"{url}?t={mtime}"
+
+        clients.append({
+            'id': cid,
+            'status': status,
+            'screenshot_exists': exists,
+            'screenshot_mtime': mtime,
+            'screenshot_url': url
+        })
+
+    # Compute pending approvals (exclude simulator accounts starting with 'sim')
+    try:
+        conn2 = sqlite3.connect(DB)
+        c2 = conn2.cursor()
+        c2.execute("SELECT COUNT(*) FROM users WHERE approved=0 AND username IS NOT NULL AND LOWER(username) NOT LIKE 'sim%'")
+        pending_count = c2.fetchone()[0] or 0
+        conn2.close()
+    except Exception:
+        pending_count = 0
+
+    return jsonify({
+        'clients': clients,
+        'counts': {'total': len(clients), 'online': pcs_online, 'idle': pcs_idle, 'offline': pcs_offline},
+        'pending_approvals': pending_count
+    })
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=5000, debug=DEBUG)
