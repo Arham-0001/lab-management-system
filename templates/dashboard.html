@@ -98,7 +98,7 @@ button.secondary { background:#e74c3c; }
         {% if pending_users %}
         <h2 style="margin-top:30px;">Pending Approvals</h2>
         {% for user in pending_users %}
-        <div class="user-card">
+        <div class="user-card" data-user-id="{{ user[0] }}">
             <div>{{ user[1] }} - {{ user[2] }}</div>
             <div class="actions">
                 <button onclick="approveUser('{{ user[0] }}')" class="approve-btn">Approve</button>
@@ -222,6 +222,51 @@ function downloadScreenshot(){
         link.click();
         document.body.removeChild(link);
     }).catch(e=>{ console.error('download screenshot error', e); });
+}
+// --- Approve / Reject handlers ---
+function openRejectModal(userId){
+    currentRejectId = userId;
+    document.getElementById('rejectReason').value = '';
+    document.getElementById('rejectModal').style.display = 'flex';
+}
+function closeRejectModal(){
+    document.getElementById('rejectModal').style.display = 'none';
+    currentRejectId = null;
+}
+function submitReject(){
+    if(!currentRejectId) return;
+    const reason = document.getElementById('rejectReason').value || '';
+    const form = new URLSearchParams();
+    form.append('reason', reason);
+    fetch(`/reject-user/${currentRejectId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: form.toString()
+    }).then(async res=>{
+        if(res.ok){
+            showToast('User rejected');
+            // remove the user card from UI
+            removeUserCard(currentRejectId);
+        } else {
+            showToast('Failed to reject user');
+        }
+        closeRejectModal();
+    }).catch(e=>{ console.error(e); showToast('Failed to reject user'); closeRejectModal(); });
+}
+function approveUser(userId){
+    fetch(`/approve-user/${userId}`, { method: 'POST' }).then(async res=>{
+        if(res.ok){
+            showToast('User approved');
+            removeUserCard(userId);
+        } else {
+            showToast('Failed to approve user');
+        }
+    }).catch(e=>{ console.error(e); showToast('Failed to approve user'); });
+}
+function removeUserCard(userId){
+    // Remove the card that has a matching data-user-id attribute
+    const el = document.querySelector(`.user-card[data-user-id="${userId}"]`);
+    if(el) el.remove();
 }
 // Per-request screenshot polling: After sending a screenshot command, call waitForScreenshot(clientId)
 async function waitForScreenshot(clientId, interval=2000, timeout=45000){
