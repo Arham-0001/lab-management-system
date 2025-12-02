@@ -3,7 +3,8 @@ from flask_cors import CORS
 import time, os, sqlite3, random, string, smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash 
+# import module
 
 app = Flask(__name__)
 CORS(app)
@@ -15,15 +16,15 @@ app.secret_key = os.environ.get("FLASK_SECRET") or os.urandom(24)
 DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
 
 
-commands = {}
-heartbeats = {}
+commands = {}   # store commands per client
+heartbeats = {} # store last heartbeat times
 os.makedirs("static/screenshots", exist_ok=True)
 
-DB = "users.db"
-CODE_STORE = {}
-CODE_EXPIRY = 600
+DB = "users.db"   # SQLite DB file
+CODE_STORE = {}   # email: {code, time}
+CODE_EXPIRY = 600 # code valid for 10 minutes
 
-def init_db():
+def init_db(): # initialize DB and tables if not exist
     conn = sqlite3.connect(DB, timeout=30)
     c = conn.cursor()
 # Better concurrency
@@ -55,14 +56,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+init_db() # ensure DB initialized
 
-def password_valid(password):
+def password_valid(password): #pass strength check
     import re
     pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*]).{8,}$'
     return re.match(pattern, password)
 
-def send_email(to_email, subject, html_content):
+def send_email(to_email, subject, html_content): # send HTML email
     # Load SMTP config from environment variables for security
     smtp_server = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
     smtp_port = int(os.environ.get('SMTP_PORT', 587))
@@ -82,7 +83,7 @@ def send_email(to_email, subject, html_content):
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
 
-def send_verification_email(to_email, code):
+def send_verification_email(to_email, code): # send code email
     html_content = f"""
     <div style="font-family:sans-serif; text-align:center; padding:20px;">
     <h2>SLMMS Verification Code</h2>
@@ -93,7 +94,7 @@ def send_verification_email(to_email, code):
     """
     send_email(to_email, "SLMMS Verification Code", html_content)
 
-def send_rejection_email(to_email, reason):
+def send_rejection_email(to_email, reason): # send rejection email
     html_content = f"""
     <div style="font-family:sans-serif; text-align:center; padding:20px;">
     <h2>SLMMS Account Rejected</h2>
@@ -105,11 +106,11 @@ def send_rejection_email(to_email, reason):
 
 # -------- Routes --------
 
-@app.route("/")
+@app.route("/") # main page
 def home():
     return redirect(url_for("login"))
 
-@app.route("/login", methods=["GET","POST"])
+@app.route("/login", methods=["GET","POST"]) # login page
 def login():
     if request.method == "POST":
         email = request.form.get("email")
@@ -160,7 +161,7 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/register", methods=["GET","POST"])
+@app.route("/register", methods=["GET","POST"]) # registration page
 def register():
     if request.method=="POST":
         username = request.form.get("username")
@@ -188,7 +189,7 @@ def register():
         return redirect(url_for("login"))
     return render_template("register.html")
 
-@app.route("/forgot-password", methods=["GET","POST"])
+@app.route("/forgot-password", methods=["GET","POST"]) # forgot password
 def forgot_password():
     if request.method=="POST":
         email = request.form.get("email")
@@ -212,7 +213,7 @@ def forgot_password():
             flash("Email not registered","error")
     return render_template("forgot_password.html")
 
-@app.route("/reset-password/<email>", methods=["GET","POST"])
+@app.route("/reset-password/<email>", methods=["GET","POST"]) # reset password
 def reset_password(email):
     if request.method=="POST":
         code = request.form.get('code')
@@ -236,7 +237,7 @@ def reset_password(email):
     return render_template("reset_password.html", email=email)
 
 # ----- Command queue endpoints -----
-@app.route('/enqueue-command', methods=['POST'])
+@app.route('/enqueue-command', methods=['POST'])      # add command for client
 def enqueue_command():
     # expected json: {client_id, command, args}
     data = request.get_json() or {}
@@ -263,7 +264,7 @@ def enqueue_command():
     conn.close()
     return jsonify({'ok':True})
 
-@app.route('/poll-commands/<client_id>', methods=['GET','POST'])
+@app.route('/poll-commands/<client_id>', methods=['GET','POST'])  # get or post command results
 def poll_commands(client_id):
     # Clients call to get pending commands. If POST with result, will update status.
     if request.method=='POST':
@@ -288,7 +289,7 @@ def poll_commands(client_id):
     items = [{'id':r[0],'command':r[1],'args':r[2],'status':r[3],'created_at':r[4]} for r in rows]
     return jsonify({'commands':items})
 
-@app.route("/dashboard")
+@app.route("/dashboard") # dashboard page
 def dashboard():
     if 'user_email' not in session:
         return redirect(url_for("login"))
@@ -345,7 +346,7 @@ def dashboard():
                            pcs_idle=pcs_idle, pcs_offline=pcs_offline,
                            heartbeats=heartbeats, now=now_ts)
 
-@app.route("/approve-user/<int:user_id>", methods=["POST"])
+@app.route("/approve-user/<int:user_id>", methods=["POST"]) # approve user
 def approve_user(user_id):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -357,7 +358,7 @@ def approve_user(user_id):
     flash("User approved","success")
     return jsonify({"ok":True})
 
-@app.route("/reject-user/<int:user_id>", methods=["POST"])
+@app.route("/reject-user/<int:user_id>", methods=["POST"])  # reject user
 def reject_user(user_id):
     reason = request.form.get("reason")
     conn = sqlite3.connect(DB)
@@ -371,24 +372,24 @@ def reject_user(user_id):
     flash("User rejected and email sent","error")
     return jsonify({"ok":True})
 
-@app.route("/logout")
+@app.route("/logout") # logout
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-@app.route("/heartbeatz/<client_id>", methods=["POST"])
+@app.route("/heartbeatz/<client_id>", methods=["POST"])     # heartbeat
 def heartbeat(client_id):
     heartbeats[client_id] = time.time()
     return jsonify({client_id:"alive"})
 
-@app.route("/status/<client_id>")
+@app.route("/status/<client_id>") # client status
 def status(client_id):
     if client_id not in heartbeats:
         return jsonify({"status":"Unknown"})
     last_seen = time.time() - heartbeats[client_id]
     return jsonify({"status":"Online" if last_seen<60 else "Offline"})
 
-@app.route("/upload/<client_id>", methods=["POST"])
+@app.route("/upload/<client_id>", methods=["POST"]) # upload screenshot
 def upload_screenshot(client_id):
     if "screenshot" not in request.files:
         return jsonify({"msg":"No screenshot file"}), 400
@@ -398,7 +399,7 @@ def upload_screenshot(client_id):
     return jsonify({"msg":"Screenshot uploaded"})
 
 
-@app.route('/screenshot/<client_id>', methods=['GET'])
+@app.route('/screenshot/<client_id>', methods=['GET']) # get screenshot info
 def screenshot_info(client_id):
     # Provide info about a screenshot: exists, mtime and a url with cache-busting mtime
     path = os.path.join('static', 'screenshots', f"{client_id}.png")
@@ -410,7 +411,7 @@ def screenshot_info(client_id):
     return jsonify({"exists": exists, "mtime": mtime, "url": url})
 
 
-@app.route('/clients-status', methods=['GET'])
+@app.route('/clients-status', methods=['GET']) # get all clients status
 def clients_status():
     # Returns current set of clients with status and screenshot info
     conn = sqlite3.connect(DB)
@@ -472,5 +473,5 @@ def clients_status():
         'pending_approvals': len([1 for u in real_usernames if False])
     })
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=5000, debug=DEBUG)
+if __name__=="__main__": # run server
+    app.run(host="0.0.0.0", port=5000, debug=DEBUG) # debug mode if set
