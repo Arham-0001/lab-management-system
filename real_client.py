@@ -16,6 +16,7 @@ import time
 import json
 import threading
 import io
+import base64
 import platform
 import subprocess
 from typing import Optional

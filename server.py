@@ -4,6 +4,9 @@ import time, os, sqlite3, random, string, smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash 
+from dotenv import load_dotenv
+load_dotenv()
+
 # import module
 
 app = Flask(__name__)
