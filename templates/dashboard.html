@@ -8,15 +8,17 @@
 <style>
 body, html { margin:0; padding:0; font-family:'Poppins',sans-serif; background:#f5f6fa; color:#333; transition: all 0.3s; }
 .dark-mode { background:#1e1e2f; color:#f5f5f5; }
-.topbar { position:fixed; top:0; left:0; width:100%; height:60px; background:#4CAF50; display:flex; align-items:center; padding:0 20px; box-shadow:0 2px 6px rgba(0,0,0,0.15); z-index:100; }
+.topbar { position:fixed; top:0; left:0; width:100%; height:64px; background: linear-gradient(90deg, #2ecc71 0%, #2fbf71 100%); display:flex; align-items:center; padding:0 22px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:100; }
 .topbar img {
     height: 40px;
     position: relative;
     border-bottom-left-radius: -50px; 
 }  
 
-button { cursor:pointer; padding:8px 14px; border:none; border-radius:6px; background:#4CAF50; color:#fff; font-weight:500; }
+button { cursor:pointer; padding:8px 12px; border:none; border-radius:8px; background:#3bb85f; color:#fff; font-weight:600; box-shadow:0 6px 14px rgba(59,184,95,0.18); transition: transform 0.08s ease, box-shadow 0.12s ease; }
+button:hover { transform: translateY(-1px); box-shadow:0 10px 22px rgba(59,184,95,0.14); }
 button.secondary { background:#e74c3c; }
+.topbar .right { display:flex; gap:10px; align-items:center; }
 .sidebar { position:fixed; top:0; left:0; width:250px; height:100%; background:#2f3640; color:#fff; transition: transform 0.3s; transform: translateX(0); padding-top:70px; z-index:99; }
 .sidebar.hidden { transform: translateX(-260px); }
 .sidebar ul { list-style:none; padding:0; margin:0; }
@@ -25,18 +27,19 @@ button.secondary { background:#e74c3c; }
 .bubble { background:#e84118; color:#fff; border-radius:50%; padding:4px 8px; font-size:12px; }
 .content { margin-left:250px; padding:80px 20px 20px 20px; transition: margin-left 0.3s; }
 .content.full { margin-left:0; }
-.card { background:#fff; border-radius:10px; padding:20px; margin-bottom:20px; box-shadow:0 4px 12px rgba(0,0,0,0.1); transition: transform 0.2s; }
-.card:hover { transform: translateY(-3px); }
+.card { background:#fff; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow:0 8px 24px rgba(0,0,0,0.06); transition: transform 0.18s; }
+.card:hover { transform: translateY(-4px); }
 .pc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:20px; margin-top:20px; }
-.pc-card { background:#fff; border-radius:10px; padding:15px; text-align:center; box-shadow:0 4px 12px rgba(0,0,0,0.08); transition: transform 0.2s; }
-.pc-card:hover { transform: translateY(-3px); }
+.pc-card { background:linear-gradient(180deg,#ffffff 0%, #fbfffb 100%); border-radius:12px; padding:18px; text-align:center; box-shadow:0 8px 18px rgba(0,0,0,0.06); transition: transform 0.18s; }
+.pc-card:hover { transform: translateY(-4px); }
 .pc-status.online { color:#27ae60; font-weight:600; }
 .pc-status.idle { color:#f39c12; font-weight:600; }
 .pc-status.offline { color:#e74c3c; font-weight:600; }
-.screenshot-thumb { width:120px; height:80px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #ddd; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+.screenshot-thumb { width:140px; height:90px; object-fit:cover; border-radius:8px; cursor:pointer; border:1px solid #eee; box-shadow: 0 6px 14px rgba(0,0,0,0.06); }
 .thumb-wrapper { position:relative; display:inline-block; }
-.thumb-overlay { position:absolute; inset:0; display:flex; justify-content:center; align-items:center; border-radius:6px; background: rgba(255,255,255,0.6); opacity:0; transition:opacity 0.15s; }
-.thumb-overlay.show { opacity:1; }
+.thumb-overlay { position:absolute; inset:0; display:flex; justify-content:center; align-items:center; border-radius:6px; background: rgba(255,255,255,0.6); opacity:0; transition:opacity 0.15s; pointer-events:none; z-index:2; }
+.thumb-overlay.show { opacity:1; pointer-events:none; }
+.thumb-overlay .spinner { pointer-events: none; }
 .spinner { border: 3px solid rgba(0,0,0,0.08); border-top: 3px solid #4CAF50; border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
@@ -56,7 +59,7 @@ button.secondary { background:#e74c3c; }
 .modal-content.dark-mode { background:#2c2c3c; color:#f5f5f5; }
 .modal-content input { width:100%; padding:12px; margin:15px 0; border-radius:6px; border:1px solid #ccc; font-size:14px; }
 .modal-content button { width:48%; }
-.disabled-btn { opacity:0.6; pointer-events:none; }
+.disabled-btn { opacity:0.6; }
 </style>
 </head>
 <body>
@@ -66,6 +69,10 @@ button.secondary { background:#e74c3c; }
     <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo">
     <div style="margin-left:auto; display:flex; gap:10px; align-items:center; margin-right:10px;">
         <!-- Auto refresh removed per user's request; we're not polling globally -->
+        {%- if session.get('role','')|lower == 'admin' %}
+        <button id="all-screenshot-btn" onclick="enqueueAll('screenshot')" title="Take screenshot on all connected PCs" style="background:#3bb85f;">All Screenshot</button>
+        <button id="all-shutdown-btn" onclick="allShutdownConfirm()" title="Shutdown all connected PCs" style="background:#e74c3c">All Shutdown</button>
+        {%- endif %}
     </div>
 
 </div>
@@ -77,7 +84,7 @@ button.secondary { background:#e74c3c; }
         <li onclick="showActive()">Active PCs</li>
         <li onclick="showLogs()">Logs</li>
         <li onclick="showSettings()">Settings</li>
-        <li onclick="logout()">Logout</li>
+        <li><a href="{{ url_for('logout') }}" style="color:inherit; text-decoration:none; display:block; width:100%;">Logout</a></li>
     </ul>
 </div>
 
@@ -139,8 +146,9 @@ button.secondary { background:#e74c3c; }
                     <option value="restart">Restart</option>
                     <option value="shutdown">Shutdown</option>
                 </select>
-                <button id="send-btn-{{ safe_id }}" {% if p.status == 'Offline' %}disabled class="disabled-btn"{% endif %} onclick="sendCommand('{{ p.id }}', document.getElementById('cmd-{{ safe_id }}').value)">Send</button>
+                <button id="send-btn-{{ safe_id }}" {% if p.status == 'Offline' %}disabled class="disabled-btn"{% endif %} onclick="sendCommand('{{ p.id }}')">Send</button>
             </div>
+            
         </div>
         {% endfor %}
         </div>
@@ -188,6 +196,7 @@ let disabledTimeouts = {}; // map clientId -> timeoutId to re-enable button if n
 function toggleSidebar() { sidebar.classList.toggle('hidden'); content.classList.toggle('full'); }
 
 function showHome() { location.reload(); } // reload main dashboard
+function showSettings(){ window.location = '/settings'; }
 
 // We do not poll globally. We'll poll only per-request when a screenshot command is sent.
 function openScreenshot(clientId){
@@ -306,6 +315,8 @@ function disableSendButton(clientId){
     if(disabledTimeouts[clientId]) clearTimeout(disabledTimeouts[clientId]);
     disabledTimeouts[clientId] = setTimeout(()=>{ enableSendButton(clientId); delete disabledTimeouts[clientId]; }, 45000);
     setThumbnailPending(clientId, true);
+    // Keep the select focused so the rest of the client card remains interactive
+    try{ const sel = document.getElementById('cmd-' + safeDomId(clientId)); if(sel) sel.focus(); }catch(e){}
 }
 
 function enableSendButton(clientId){
@@ -333,31 +344,64 @@ function showToast(message, timeout=5000){
     setTimeout(()=>{ t.style.opacity='0'; t.addEventListener('transitionend', ()=>t.remove()); }, timeout);
 }
 
-function sendCommand(clientId, command){
-    if(command === 'screenshot'){
-        disableSendButton(clientId);
-    }
-    fetch('/enqueue-command', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({client_id: clientId, command: command, args: ''})
-    }).then(async (res)=>{
-        const data = await res.json().catch(()=>({}));
-            if(res.ok){
-            showToast('Command enqueued');
-            if(command === 'screenshot'){
-                // start polling only for this client; once screenshot arrives, enable button
-                waitForScreenshot(clientId);
-            }
-        } else if(res.status === 409){
-            showToast(data?.message || 'Screenshot already pending');
-            if(command === 'screenshot'){ enableSendButton(clientId); }
-        } else {
-            showToast('Failed to enqueue: ' + (data?.message || res.status));
-            if(command === 'screenshot'){ enableSendButton(clientId); }
+function sendCommand(clientId){
+    // Read the selected command from the associated select element.
+    let cmdEl = document.getElementById('cmd-' + safeDomId(clientId));
+    let command = (cmdEl && cmdEl.value) ? cmdEl.value : 'screenshot';
+    try{
+        if(command === 'screenshot'){
+            disableSendButton(clientId);
         }
-    }).catch(e=>{ showToast('Failed to enqueue'); if(command === 'screenshot'){ enableSendButton(clientId); } });
+        fetch('/enqueue-command', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({client_id: clientId, command: command, args: ''})
+        }).then(async (res)=>{
+            const data = await res.json().catch(()=>({}));
+            if(res.ok){
+                showToast('Command enqueued');
+                if(command === 'screenshot'){
+                    // start polling only for this client; once screenshot arrives, enable button
+                    waitForScreenshot(clientId);
+                }
+            } else if(res.status === 409){
+                showToast(data?.message || 'Screenshot already pending');
+                if(command === 'screenshot'){ enableSendButton(clientId); }
+            } else {
+                showToast('Failed to enqueue: ' + (data?.message || res.status));
+                if(command === 'screenshot'){ enableSendButton(clientId); }
+            }
+        }).catch(e=>{ console.error('enqueue error', e); showToast('Failed to enqueue'); if(command === 'screenshot'){ enableSendButton(clientId); } });
+    }catch(e){ console.error('sendCommand error', e); enableSendButton(clientId); showToast('Internal error'); }
 }
+
+// Confirm & enqueue all-clients shutdown
+function allShutdownConfirm(){
+    if(!confirm('Shutdown ALL connected real PCs now? This will enqueue a shutdown command for each client.')) return;
+    enqueueAll('shutdown');
+}
+
+async function enqueueAll(command){
+    try{
+        const res = await fetch('/enqueue-all', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({command: command, args: ''})
+        });
+        if(!res.ok){
+            const d = await res.json().catch(()=>({}));
+            showToast('Failed to enqueue for all: ' + (d?.message || res.status));
+            return;
+        }
+        const data = await res.json().catch(()=>({}));
+        showToast(`Enqueued '${command}' for ${data.enqueued || 0} clients`);
+    }catch(e){ console.error('enqueueAll failed', e); showToast('Enqueue all failed'); }
+}
+
+// Send a run-command to a single client (reads the text input next to the PC)
+// sendRunCommand removed to disable remote code execution UI & behavior
+
+// list/read commands removed — client and server only support screenshot, restart, shutdown
 // Safe image onerror handler — sets fallback image and disables further onerror loops
 function onImageError(img){
     if(!img) return;
@@ -428,6 +472,11 @@ async function updateClientsStatus(){
                 div.className = 'pc-card';
                 div.innerHTML = `\n                    <div style="font-weight:600">${cid}</div>\n                    <div class="pc-status ${status.toLowerCase()}">${status}</div>\n                    <div style="margin-top:10px;">\n                        <div class=\"thumb-wrapper\">\n                            <img id=\"screenshot-thumb-${safe}\" data-client-id=\"${cid}\" src=\"${thumbUrl}\" alt=\"Screenshot for ${cid}\" class=\"screenshot-thumb\" onerror=\"onImageError(this)\" onclick=\"openScreenshot('${cid}')\">\n                            <div id=\"thumb-overlay-${safe}\" class=\"thumb-overlay\" aria-hidden=\"true\"><div class=\"spinner\"></div></div>\n                        </div>\n                    </div>\n                    <div style=\"margin-top:10px; display:flex; gap:8px; justify-content:center; align-items:center;\">\n                        <select id=\"cmd-${safe}\">\n                            <option value=\"screenshot\">Screenshot</option>\n                            <option value=\"restart\">Restart</option>\n                            <option value=\"shutdown\">Shutdown</option>\n                        </select>\n                        <button id=\"send-btn-${safe}\" ${status==='Offline'?'disabled class=\"disabled-btn\"':''} onclick=\"sendCommand('${cid}', document.getElementById('cmd-${safe}').value)\">Send</button>\n                    </div>`;
                 grid.appendChild(div);
+                // Ensure dynamically-created send button uses safe sendCommand lookup
+                try{
+                    const btn = div.querySelector(`#send-btn-${safe}`);
+                    if(btn){ btn.onclick = function(){ sendCommand(cid); }; }
+                }catch(e){ console.error('attach send handler failed', e); }
                 lastMTime[cid] = mtime || 0;
             }
         }

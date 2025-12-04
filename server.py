@@ -239,8 +239,9 @@ def register():
                   (username,email,pw_hash,"Teacher",0))
         conn.commit()
         conn.close()
-        flash("Account created! Contact admin to approve.","info")
-        return redirect(url_for("login"))
+        # Account created and will require admin approval. No email verification step.
+        flash("Account created. Waiting for administrator approval.", "info")
+        return redirect(url_for('login'))
     return render_template("register.html")
 
 @app.route("/forgot-password", methods=["GET","POST"]) # forgot password
@@ -298,7 +299,23 @@ def enqueue_command():
     args = data.get('args', '')
     if not client_id or not command:
         return jsonify({'error':'client_id and command required'}), 400
+    # Only allow a small, safe set of commands from the dashboard/API.
+    allowed = {'screenshot', 'restart', 'shutdown'}
+    if command not in allowed:
+        return jsonify({'ok': False, 'message': f'only commands allowed: {sorted(list(allowed))}'}), 400
     now = time.time()
+    # Clean up stale pending commands so a stuck/old pending doesn't block new requests.
+    STALE_PENDING = int(os.environ.get('STALE_PENDING_SECONDS', '120'))
+    try:
+        conn_cleanup = sqlite3.connect(DB)
+        c_cleanup = conn_cleanup.cursor()
+        cutoff = now - STALE_PENDING
+        c_cleanup.execute("DELETE FROM commands WHERE client_id=? AND status='pending' AND created_at<?", (client_id, cutoff))
+        conn_cleanup.commit()
+        conn_cleanup.close()
+    except Exception:
+        pass
+
     # For safety, prevent duplicate pending 'screenshot' commands for the same client
     if command == 'screenshot':
         conn_check = sqlite3.connect(DB)
@@ -315,6 +332,66 @@ def enqueue_command():
     conn.commit()
     conn.close()
     return jsonify({'ok':True})
+
+
+@app.route('/enqueue-all', methods=['POST'])
+@admin_required
+def enqueue_all():
+    """Enqueue a command for all known real clients (registered real users + heartbeat clients).
+    Excludes simulator accounts whose usernames start with 'sim'. Returns counts and skipped list.
+    """
+    data = request.get_json() or {}
+    command = data.get('command')
+    args = data.get('args', '')
+    if not command:
+        return jsonify({'error':'command required'}), 400
+    # Only allow a small safe set of commands via bulk API
+    allowed_bulk = {'screenshot', 'restart', 'shutdown'}
+    if command not in allowed_bulk:
+        return jsonify({'error': f'only bulk commands supported: {sorted(list(allowed_bulk))}'}), 400
+
+    # Gather real registered usernames (exclude simulator accounts) and heartbeat-known clients
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT username FROM users")
+    users = c.fetchall()
+    conn.close()
+
+    real_usernames = []
+    for u in users:
+        uname = u[0]
+        if not uname:
+            continue
+        if uname.lower().startswith('sim'):
+            continue
+        real_usernames.append(uname)
+
+    client_ids = set(real_usernames) | set(heartbeats.keys())
+
+    enqueued = 0
+    skipped = []
+    now_ts = time.time()
+    conn2 = sqlite3.connect(DB)
+    c2 = conn2.cursor()
+    for cid in sorted(client_ids):
+        # remove stale pending for this client to avoid blocking bulk enqueue
+        try:
+            cutoff = now_ts - int(os.environ.get('STALE_PENDING_SECONDS', '120'))
+            c2.execute("DELETE FROM commands WHERE client_id=? AND status='pending' AND created_at<?", (cid, cutoff))
+        except Exception:
+            pass
+        # skip duplicate pending screenshot commands per-client
+        if command == 'screenshot':
+            c2.execute("SELECT id FROM commands WHERE client_id=? AND command=? AND status='pending'", (cid, command))
+            if c2.fetchone():
+                skipped.append(cid)
+                continue
+        c2.execute('INSERT INTO commands (client_id,command,args,created_at,updated_at) VALUES (?,?,?,?,?)',
+                   (cid, command, str(args), now_ts, now_ts))
+        enqueued += 1
+    conn2.commit()
+    conn2.close()
+    return jsonify({'ok':True, 'enqueued': enqueued, 'skipped': skipped})
 
 @app.route('/poll-commands/<client_id>', methods=['GET','POST'])  # get or post command results
 def poll_commands(client_id):
@@ -398,6 +475,37 @@ def dashboard():
                            pcs_idle=pcs_idle, pcs_offline=pcs_offline,
                            heartbeats=heartbeats, now=now_ts)
 
+
+@app.route('/settings', methods=['GET','POST'])
+def settings():
+    # Require login
+    if 'user_email' not in session:
+        return redirect(url_for('login'))
+    email = session.get('user_email')
+    if request.method == 'POST':
+        new_pw = request.form.get('new_password')
+        if not new_pw:
+            flash('Password required','error')
+            return redirect(url_for('settings'))
+        if not password_valid(new_pw):
+            flash('Password must include upper, lower, number, special char & min 8 chars','error')
+            return redirect(url_for('settings'))
+        try:
+            conn = sqlite3.connect(DB)
+            c = conn.cursor()
+            pw_hash = generate_password_hash(new_pw)
+            c.execute('UPDATE users SET password=? WHERE email=?', (pw_hash, email))
+            conn.commit()
+            conn.close()
+            flash('Password updated','success')
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            print('Failed to update password for', email, e)
+            flash('Failed to update password','error')
+            return redirect(url_for('settings'))
+    # GET: render settings page
+    return render_template('settings.html')
+
 @app.route("/approve-user/<int:user_id>", methods=["POST"])
 @admin_required
 def approve_user(user_id):
@@ -456,7 +564,38 @@ def reject_user(user_id):
 @app.route("/logout") # logout
 def logout():
     session.clear()
+    flash('Logged out','info')
     return redirect(url_for("login"))
+
+
+@app.route('/verify-code', methods=['GET','POST'])
+def verify_code():
+    # Email may be provided as query param or in form hidden field
+    email = request.args.get('email') or request.form.get('email')
+    if request.method == 'POST':
+        code = request.form.get('code')
+        if not email or not code:
+            flash('Email and code required','error')
+            return redirect(url_for('verify_code') + (f'?email={email}' if email else ''))
+        entry = CODE_STORE.get(email)
+        if not entry or entry.get('code') != code or (time.time() - entry.get('time',0))>CODE_EXPIRY:
+            flash('Invalid or expired code','error')
+            return redirect(url_for('verify_code') + f'?email={email}')
+        try:
+            conn = sqlite3.connect(DB)
+            c = conn.cursor()
+            c.execute("UPDATE users SET approved=1 WHERE email=?", (email,))
+            conn.commit()
+            conn.close()
+            CODE_STORE.pop(email, None)
+            flash('Email verified. You can now log in.', 'success')
+            return redirect(url_for('login'))
+        except Exception as e:
+            print('verify_code DB update failed', e)
+            flash('Verification failed, contact admin', 'error')
+            return redirect(url_for('verify_code') + f'?email={email}')
+    # GET: render template and pass email so template can include hidden field
+    return render_template('verify_code.html', email=email)
 
 @app.route("/heartbeatz/<client_id>", methods=["POST"])     # heartbeat
 def heartbeat(client_id):

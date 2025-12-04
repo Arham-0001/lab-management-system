@@ -36,6 +36,10 @@ body, html { margin:0; padding:0; font-family:'Poppins', sans-serif; height:100%
     <div class="form-box">
         <h2>Verify Code</h2>
         <form method="POST">
+          {% if email %}
+          <input type="hidden" name="email" value="{{ email }}">
+          <p style="text-align:center; font-size:0.9em; color:#ddd;">Verifying: <strong>{{ email }}</strong></p>
+          {% endif %}
             <input type="text" name="code" placeholder="Enter Verification Code" required>
             <button type="submit">Verify</button>
         </form>

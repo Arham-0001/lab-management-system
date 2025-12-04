@@ -38,6 +38,9 @@ CLIENT_ID = os.environ.get("CLIENT_ID") or platform.node() or "client-unknown"
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "5"))      # seconds
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "15"))
 ENABLE_REMOTE_POWER = os.environ.get("ENABLE_REMOTE_POWER", "false").lower() in ("1","true","yes")
+# Remote code execution is intentionally DISABLED by default for safety.
+# Removed ENABLE_REMOTE_COMMANDS support to prevent remote exec risks.
+ENABLE_REMOTE_READ = os.environ.get("ENABLE_REMOTE_READ", "false").lower() in ("1","true","yes")
 AUTH_TOKEN = os.environ.get("CLIENT_AUTH_TOKEN")  # optional header auth token
 
 # Optional: try to load config.json in cwd
@@ -112,15 +115,16 @@ def handle_command(cmd: dict):
             except Exception as e:
                 result = f"upload exception: {e}"
 
-        elif command in ("restart", "shutdown"):
-            if not ENABLE_REMOTE_POWER:
-                result = f"{command} blocked by client config (ENABLE_REMOTE_POWER=False)"
-            else:
-                # careful: these are destructive operations — only run if explicitly enabled
-                result = perform_power_action(command)
-
         else:
-            result = f"unhandled command: {command} args={args}"
+            # Power actions: restart/shutdown (if enabled)
+            if command in ("restart", "shutdown"):
+                if ENABLE_REMOTE_POWER:
+                    result = perform_power_action(command)
+                else:
+                    result = "power actions disabled on this client"
+            else:
+                # All other commands (including arbitrary remote exec) are not supported.
+                result = f"command not supported: {command}"
 
     except Exception as e:
         result = f"error executing command: {e}"
