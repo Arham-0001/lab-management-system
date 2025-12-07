@@ -56,6 +56,18 @@ def init_db(): # initialize DB and tables if not exist
             updated_at REAL
         )
     ''')
+    # Audit logs table for command history
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            issued_by TEXT,
+            client_id TEXT,
+            command TEXT,
+            status TEXT,
+            result TEXT,
+            created_at REAL
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -158,7 +170,7 @@ def send_rejection_email(to_email, reason): # send rejection email
     except Exception:
         return False
 
-# -------- Routes --------
+# ____________+_+_+_+----Routes----+_+_+_+____________ #
 
 @app.route("/") # main page
 def home():
@@ -329,6 +341,10 @@ def enqueue_command():
     c = conn.cursor()
     c.execute('INSERT INTO commands (client_id,command,args,created_at,updated_at) VALUES (?,?,?,?,?)',
               (client_id, command, str(args), now, now))
+    # Log the action for audit
+    issued_by = session.get('user_email', 'unknown')
+    c.execute('INSERT INTO logs (issued_by, client_id, command, status, created_at) VALUES (?,?,?,?,?)',
+              (issued_by, client_id, command, 'enqueued', now))
     conn.commit()
     conn.close()
     return jsonify({'ok':True})
@@ -371,6 +387,7 @@ def enqueue_all():
     enqueued = 0
     skipped = []
     now_ts = time.time()
+    issued_by = session.get('user_email', 'unknown')
     conn2 = sqlite3.connect(DB)
     c2 = conn2.cursor()
     for cid in sorted(client_ids):
@@ -388,6 +405,9 @@ def enqueue_all():
                 continue
         c2.execute('INSERT INTO commands (client_id,command,args,created_at,updated_at) VALUES (?,?,?,?,?)',
                    (cid, command, str(args), now_ts, now_ts))
+        # Log the action
+        c2.execute('INSERT INTO logs (issued_by, client_id, command, status, created_at) VALUES (?,?,?,?,?)',
+                   (issued_by, cid, command, 'enqueued', now_ts))
         enqueued += 1
     conn2.commit()
     conn2.close()
@@ -505,6 +525,35 @@ def settings():
             return redirect(url_for('settings'))
     # GET: render settings page
     return render_template('settings.html')
+
+
+@app.route('/logs')
+def logs_view():
+    # Require login
+    if 'user_email' not in session:
+        return redirect(url_for('login'))
+    
+    # Fetch last 100 logs
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute('SELECT id, issued_by, client_id, command, status, result, created_at FROM logs ORDER BY created_at DESC LIMIT 100')
+    rows = c.fetchall()
+    conn.close()
+    
+    logs_list = []
+    for r in rows:
+        logs_list.append({
+            'id': r[0],
+            'issued_by': r[1],
+            'client_id': r[2],
+            'command': r[3],
+            'status': r[4],
+            'result': r[5],
+            'created_at': r[6]
+        })
+    
+    return jsonify({'logs': logs_list})
+
 
 @app.route("/approve-user/<int:user_id>", methods=["POST"])
 @admin_required
